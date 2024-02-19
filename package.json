@@ -1,5 +1,5 @@
 {
-  "name": "vve-i18n-cli",
+  "name": "@easyfe/vve-i18n-cli",
   "version": "7.0.1",
   "description": "generate an internationalized text resource file",
   "bin": {

@@ -99,6 +99,8 @@ const config = {
   jsI18nFuncName: 'i18n.t',
   // vue相关文件需要使用的国际化方法
   vueI18nFuncName: '$t',
+  vueI18nScriptName: 'i18n.global.t',
+  vueI18nScriptImport: `import i18n from "@/locales";`
 };
 
 Object.assign(config, program);
@@ -126,7 +128,7 @@ if (!program.cwd) {
   absoluteCwd = path.resolve(config.cwd);
 }
 
-const { ignorePreReg, i18nImportForJs, jsI18nFuncName, vueI18nFuncName, ignoreText, ignoreAttr } = config
+const { ignorePreReg, i18nImportForJs, jsI18nFuncName, vueI18nFuncName, ignoreText, ignoreAttr, vueI18nScriptName, vueI18nScriptImport } = config
 
 const absoluteRootDir = path.resolve(absoluteCwd, config.rootDir);
 
@@ -138,7 +140,7 @@ const absoluteRootDir = path.resolve(absoluteCwd, config.rootDir);
 const regI18n = new RegExp(/([^\x00-\xff]+)/, "g");
 
 // 左边是否是>
-function letfRt (str, startIndex, range = 50) {
+function letfRt(str, startIndex, range = 50) {
   const end = startIndex - range
   for (let i = startIndex; i >= end; i--) {
     if (str.charAt(i) === '>') return true
@@ -148,7 +150,7 @@ function letfRt (str, startIndex, range = 50) {
   return false
 }
 // 右边是否是<
-function rightLt (str, startIndex, range = 50) {
+function rightLt(str, startIndex, range = 50) {
   const end = startIndex + range
   for (let i = startIndex; i <= end; i++) {
     if (str.charAt(i) === '<') return true
@@ -158,7 +160,7 @@ function rightLt (str, startIndex, range = 50) {
   return false
 }
 // 是否在 > 之间 <
-function betweenRtAndLt (strContent, match, index, range) {
+function betweenRtAndLt(strContent, match, index, range) {
   return letfRt(strContent, index - 1, range) && rightLt(strContent, match.length + index, range)
 }
 
@@ -199,24 +201,24 @@ function getLineSubfixText(str, match, index, range = 300) {
 }
 
 // 判定是否被双斜杆注释包裹
-function isWrapByDoubelSlashComment (str, match, index, range = 500) {
-  const linePreText = getLinePreText(str, match ,index, range)
+function isWrapByDoubelSlashComment(str, match, index, range = 500) {
+  const linePreText = getLinePreText(str, match, index, range)
   return linePreText.indexOf('//') !== -1
 }
 
 const i18nWrapPrefixReg = /t\s*\(\s*$/
 // 是否被$t包裹 $t("你好") 识别出来的中文
-function isWrapByI18n (str, match, index, range) {
+function isWrapByI18n(str, match, index, range) {
   // const subfixText = getLineSubfixText(str, match, index, range) // 不判断后缀了，直接判定前缀
   // if (subfixText.trim().charAt(0) !== ')') return false
-  const linePreText = getLinePreText(str, match ,index, range)
+  const linePreText = getLinePreText(str, match, index, range)
   if (!i18nWrapPrefixReg.test(linePreText.trim())) return false
   return true
 }
 
 // 前缀是否满足要求
-function prefixTestReg (reg, str, match, index, range) {
-  const linePreText = getLinePreText(str, match ,index, range)
+function prefixTestReg(reg, str, match, index, range) {
+  const linePreText = getLinePreText(str, match, index, range)
   return new RegExp(reg).test(linePreText.trim())
 }
 
@@ -246,7 +248,8 @@ const i18nStrReg = /"([^"{}\n]*[^\x00-\xff]+[^"{}\n]*)"|'([^'{}\n]*[^\x00-\xff]+
 const i18nStrRegForBacktick = /`([^`\n]*[^\x00-\xff]+[^`\n]*)`/g
 
 // 解析vue文件
-function processVueFile (fileContent) {
+function processVueFile(fileContent) {
+  let addImport = false
   // 过滤出template相关内容，处理tag内容的国际化
   let newFileContent = fileContent.replace(templateReg, function (match, templateKey, index) {
     // 经过TagContentReg的过滤，$()"",这些关键字都不会被当作国际化文本处理
@@ -388,8 +391,8 @@ function processVueFile (fileContent) {
         }
       }
       if (match.indexOf('/*') !== -1) return match
-      // vueI18nFuncName = '$t' => `this.$t(${match})`
-      return `this.${vueI18nFuncName}(${match})`
+      addImport = true
+      return `${vueI18nScriptName}(${match})`
     })
 
     if (scriptKey === newScriptKey) {
@@ -401,6 +404,14 @@ function processVueFile (fileContent) {
       return match.replace(scriptKey, newScriptKey.replace(/\$/g, "$$$$"))
     }
   })
+
+  if (addImport) {
+    if (newFileContent.indexOf(vueI18nScriptImport) === -1) {
+      newFileContent = newFileContent.replace(/<script.*?>/g, function (match, key, index) {
+        return `${match}\n${vueI18nScriptImport}`
+      })
+    }
+  }
 
   // console.log(newFileContent)
   // 过滤出script相关内容，过滤出反引号包裹的中文字符串，对这种类型进行替换国际化替换
@@ -418,7 +429,7 @@ function processVueFile (fileContent) {
       }
 
       // 如果是 标签模板字符串 就忽略掉，不处理，应为前面带有函数名，有特殊用途，无法正常转国际化
-      if (/[a-zA-Z0-9_\$]/.test(templateKey[index -1])) {
+      if (/[a-zA-Z0-9_\$]/.test(templateKey[index - 1])) {
         return match
       }
 
@@ -472,7 +483,7 @@ function processVueFile (fileContent) {
       }
 
       // 如果是 标签模板字符串 就忽略掉，不处理，应为前面带有函数名，有特殊用途，无法正常转国际化
-      if (/[a-zA-Z0-9_\$]/.test(scriptKey[index -1])) {
+      if (/[a-zA-Z0-9_\$]/.test(scriptKey[index - 1])) {
         return match
       }
 
@@ -515,23 +526,23 @@ function processVueFile (fileContent) {
 }
 
 // 解析html文件
-function processHtmlFile (fileContent) {
+function processHtmlFile(fileContent) {
   let newFileContent = fileContent;
   // 先移除 html 里的 script，style，link 代码块
   const scriptCodes = [];
   const styleCodes = [];
   const linkCodes = [];
-  newFileContent = newFileContent.replace(/(<script[\s\S]*?<\/script>)/ig, function(match, key, index) {
+  newFileContent = newFileContent.replace(/(<script[\s\S]*?<\/script>)/ig, function (match, key, index) {
     const count = scriptCodes.length;
     scriptCodes.push(match);
     return match.replace(key, `@@scriptCodes_${count}@@`);
   });
-  newFileContent = newFileContent.replace(/(<style[\s\S]*?<\/style>)/ig, function(match, key, index) {
+  newFileContent = newFileContent.replace(/(<style[\s\S]*?<\/style>)/ig, function (match, key, index) {
     const count = styleCodes.length;
     styleCodes.push(match);
     return match.replace(key, `@@styleCodes_${count}@@`);
   });
-  newFileContent = newFileContent.replace(/(<link[\s\S]*?<\/link>)/ig, function(match, key, index) {
+  newFileContent = newFileContent.replace(/(<link[\s\S]*?<\/link>)/ig, function (match, key, index) {
     const count = linkCodes.length;
     linkCodes.push(match);
     return match.replace(key, `@@linkCodes_${count}@@`);
@@ -665,7 +676,7 @@ function processHtmlFile (fileContent) {
     }
 
     // 如果是 标签模板字符串 就忽略掉，不处理，应为前面带有函数名，有特殊用途，无法正常转国际化
-    if (/[a-zA-Z0-9_\$]/.test(newFileContent[index -1])) {
+    if (/[a-zA-Z0-9_\$]/.test(newFileContent[index - 1])) {
       return match
     }
 
@@ -696,24 +707,24 @@ function processHtmlFile (fileContent) {
 
   // console.log(newFileContent)
   // 再恢复 html 里的 script，style，link 代码块
-  newFileContent = newFileContent.replace(/(@@scriptCodes_.*?@@)/ig, function(match, key, index) {
+  newFileContent = newFileContent.replace(/(@@scriptCodes_.*?@@)/ig, function (match, key, index) {
     const i = match.match(/@@scriptCodes_(.*?)@@/)[1];
     return match.replace(key, scriptCodes[i].replace(/\$/g, "$$$$"));
   });
-  newFileContent = newFileContent.replace(/(@@styleCodes_.*?@@)/ig, function(match, key, index) {
+  newFileContent = newFileContent.replace(/(@@styleCodes_.*?@@)/ig, function (match, key, index) {
     const i = match.match(/@@styleCodes_(.*?)@@/)[1];
     return match.replace(key, styleCodes[i].replace(/\$/g, "$$$$"));
   });
-  newFileContent = newFileContent.replace(/(@@linkCodes_.*?@@)/ig, function(match, key, index) {
+  newFileContent = newFileContent.replace(/(@@linkCodes_.*?@@)/ig, function (match, key, index) {
     const i = match.match(/@@linkCodes_(.*?)@@/)[1];
     return match.replace(key, linkCodes[i].replace(/\$/g, "$$$$"));
   });
- 
+
   return newFileContent
 }
 
 // 解析js文件
-function processJsFile (fileContent) {
+function processJsFile(fileContent) {
   let newFileContent = fileContent
   newFileContent = newFileContent.replace(i18nStrReg, function (match, key, key2, index) {
     for (let i = 0; i < ignorePreReg.length; i++) {
@@ -744,7 +755,7 @@ function processJsFile (fileContent) {
     }
 
     // 如果是 标签模板字符串 就忽略掉，不处理，应为前面带有函数名，有特殊用途，无法正常转国际化
-    if (/[a-zA-Z0-9_\$]/.test(newFileContent[index -1])) {
+    if (/[a-zA-Z0-9_\$]/.test(newFileContent[index - 1])) {
       return match
     }
 
@@ -784,8 +795,8 @@ function processJsFile (fileContent) {
 const disableTextArr = []
 
 // 根据匹配规则，把匹配的内容，替换成一个占位符
-function replaceWithPlaceholderByRule (str, rule) {
-  str = str.replace(new RegExp(rule), function(match, key, index) {
+function replaceWithPlaceholderByRule(str, rule) {
+  str = str.replace(new RegExp(rule), function (match, key, index) {
     const count = disableTextArr.length;
     disableTextArr.push(key);
     return match.replace(key, `@@@@@@disableText_${count}@@@@@@`);
@@ -794,7 +805,7 @@ function replaceWithPlaceholderByRule (str, rule) {
 }
 
 // 根据匹配规则列表，把匹配的内容，替换成一个占位符
-function replaceWithPlaceholder (str, disableRules) {
+function replaceWithPlaceholder(str, disableRules) {
   for (let i = 0; i < disableRules.length; i++) {
     str = replaceWithPlaceholderByRule(str, disableRules[i])
   }
@@ -802,55 +813,55 @@ function replaceWithPlaceholder (str, disableRules) {
 }
 
 // 把占位的内容，还原
-function placeholderRestore (str) {
-  str = str.replace(/(@@@@@@disableText_(\d+)@@@@@@)/g, function(match, key, key2, index) {
+function placeholderRestore(str) {
+  str = str.replace(/(@@@@@@disableText_(\d+)@@@@@@)/g, function (match, key, key2, index) {
     return disableTextArr[key2]
   });
   return str
 }
 
-function run () {
+function run() {
   vfs
-  .src(config.i18nFileRules.map(item => path.resolve(absoluteRootDir, item)),{
+    .src(config.i18nFileRules.map(item => path.resolve(absoluteRootDir, item)), {
       ignore: config.ignoreI18nFileRules.map(item => path.resolve(absoluteRootDir, item)),
       dot: false
     }
-  )
-  .pipe(
-    map((file, cb) => {
-      console.log('开始解析', file.path)
-      const extname = path.extname(file.path)
-      let originfileContent = file.contents.toString()
+    )
+    .pipe(
+      map((file, cb) => {
+        console.log('开始解析', file.path)
+        const extname = path.extname(file.path)
+        let originfileContent = file.contents.toString()
 
-      // 根据禁用匹配规则列表，把匹配的内容替换成一个占位符，之后就不会为这些代码的国际化文本进行包裹
-      let fileContent = replaceWithPlaceholder(originfileContent, config.disableRules)
+        // 根据禁用匹配规则列表，把匹配的内容替换成一个占位符，之后就不会为这些代码的国际化文本进行包裹
+        let fileContent = replaceWithPlaceholder(originfileContent, config.disableRules)
 
-      let newFileContent = ''
-      if (extname.toLowerCase() === '.vue') {
-        newFileContent = processVueFile(fileContent)
-      } else if (extname.toLowerCase() === '.js') {
-        newFileContent = processJsFile(fileContent)
-      } else if (extname.toLowerCase() === '.html' || extname.toLowerCase() === '.htm') {
-        newFileContent = processHtmlFile(fileContent)
-      }
+        let newFileContent = ''
+        if (extname.toLowerCase() === '.vue') {
+          newFileContent = processVueFile(fileContent)
+        } else if (extname.toLowerCase() === '.js') {
+          newFileContent = processJsFile(fileContent)
+        } else if (extname.toLowerCase() === '.html' || extname.toLowerCase() === '.htm') {
+          newFileContent = processHtmlFile(fileContent)
+        }
 
-      // 把之前不处理的代码还原
-      newFileContent = placeholderRestore(newFileContent)
+        // 把之前不处理的代码还原
+        newFileContent = placeholderRestore(newFileContent)
 
-      if (!newFileContent) {
-        console.log('内容为空，无需处理', file.path)
-      } else if (newFileContent !== originfileContent) {
-        fs.writeFileSync(file.path, newFileContent)
-        console.log('处理完成', file.path)
-      } else {
-        console.log('内容未改变，无需处理', file.path)
-      }
-      cb()
-    })
-  )
-  .on("end", () => {
-    console.log('全部处理完成')
-  });
+        if (!newFileContent) {
+          console.log('内容为空，无需处理', file.path)
+        } else if (newFileContent !== originfileContent) {
+          fs.writeFileSync(file.path, newFileContent)
+          console.log('处理完成', file.path)
+        } else {
+          console.log('内容未改变，无需处理', file.path)
+        }
+        cb()
+      })
+    )
+    .on("end", () => {
+      console.log('全部处理完成')
+    });
 }
 
 run()
